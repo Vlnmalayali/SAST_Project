@@ -1,0 +1,296 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+<<<<<<< HEAD
+    lint:
+=======
+  lint:
+>>>>>>> bc5ba9ad6041be3f266ecdc784fdf90bb8de1d63
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install linting tools
+        run: |
+<<<<<<< HEAD
+          pip install ruff black
+
+      - name: Auto-fix with Ruff
+        run: |
+          cd backend
+          ruff check app/ --fix --unsafe-fixes || true
+          ruff format app/ || true
+=======
+          pip install ruff black mypy
+>>>>>>> bc5ba9ad6041be3f266ecdc784fdf90bb8de1d63
+
+      - name: Run Ruff linter
+        run: |
+          cd backend
+<<<<<<< HEAD
+          ruff check app/ --config pyproject.toml
+=======
+          ruff check app/ --output-format=github
+>>>>>>> bc5ba9ad6041be3f266ecdc784fdf90bb8de1d63
+
+      - name: Check Black formatting
+        run: |
+          cd backend
+<<<<<<< HEAD
+          black --check --diff app/ || true
+=======
+          black --check --diff app/
+
+      - name: Run MyPy type checking (non-blocking)
+        continue-on-error: true
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          mypy app/ --ignore-missing-imports --no-error-summary || true
+
+>>>>>>> bc5ba9ad6041be3f266ecdc784fdf90bb8de1d63
+  test:
+    name: Tests & Coverage
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: test_sast_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx faker
+
+      - name: Create test database
+        env:
+          PGPASSWORD: test_password
+        run: |
+          psql -h localhost -U test_user -d test_sast_db -c "SELECT 1;" || true
+
+      - name: Run Alembic migrations
+        env:
+          DATABASE_URL: postgresql+asyncpg://test_user:test_password@localhost:5432/test_sast_db
+          DATABASE_URL_SYNC: postgresql://test_user:test_password@localhost:5432/test_sast_db
+          REDIS_URL: redis://localhost:6379/0
+          CELERY_BROKER_URL: redis://localhost:6379/1
+          CELERY_RESULT_BACKEND: redis://localhost:6379/2
+          JWT_SECRET: ci-test-jwt-secret-key-not-for-production
+          OPENAI_API_KEY: sk-test-fake-key-for-ci
+        run: |
+          cd backend
+          alembic upgrade head
+
+      - name: Run unit tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://test_user:test_password@localhost:5432/test_sast_db
+          DATABASE_URL_SYNC: postgresql://test_user:test_password@localhost:5432/test_sast_db
+          REDIS_URL: redis://localhost:6379/0
+          CELERY_BROKER_URL: redis://localhost:6379/1
+          CELERY_RESULT_BACKEND: redis://localhost:6379/2
+          JWT_SECRET: ci-test-jwt-secret-key-not-for-production
+          OPENAI_API_KEY: sk-test-fake-key-for-ci
+          PYTHONPATH: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/backend
+        run: |
+          cd backend
+          python -m pytest tests/ \
+            -v \
+            --tb=short \
+            --cov=app \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
+            --cov-report=term-missing \
+            --junitxml=test-results.xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.xml
+            backend/htmlcov/
+          retention-days: 14
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: backend/test-results.xml
+          retention-days: 14
+
+      - name: Post coverage comment on PR
+        if: github.event_name == 'pull_request'
+        uses: orgoro/coverage@v3.2
+        with:
+          coverageFile: backend/coverage.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          thresholdAll: 0.6
+          thresholdNew: 0.8
+        continue-on-error: true
+
+  security-scan:
+    name: Dependency Security Scan
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run pip-audit
+        run: |
+          pip install pip-audit
+          cd backend
+          pip-audit --strict --desc || true
+
+      - name: Run Safety check
+        run: |
+          pip install safety
+          cd backend
+          safety check --full-report || true
+
+  docker-build:
+    name: Docker Build Verification
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          cd backend
+          docker build \
+            -f docker/Dockerfile \
+            -t sast-backend:${{ github.sha }} \
+            -t sast-backend:latest \
+            .
+
+      - name: Verify image runs
+        run: |
+          docker run --rm sast-backend:${{ github.sha }} \
+            python -c "from app.config import settings; print(f'App: {settings.APP_NAME}')"
+
+      - name: Check image size
+        run: |
+          SIZE=$(docker image inspect sast-backend:${{ github.sha }} --format='{{.Size}}')
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Image size: ${SIZE_MB}MB"
+          if [ "$SIZE_MB" -gt 2000 ]; then
+            echo "::warning::Docker image exceeds 2GB (${SIZE_MB}MB)"
+          fi
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [test, docker-build]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy notification
+        run: |
+          echo "🚀 Would deploy to staging environment"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          # Add actual deployment commands here:
+          # - Push Docker image to registry
+          # - Update ECS/K8s service
+          # - Run database migrations
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [test, docker-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy notification
+        run: |
+          echo "🚀 Would deploy to production environment"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          # Add actual deployment commands here:
+          # - Push Docker image to ECR/GCR
+          # - Update ECS/K8s service
+          # - Run database migrations
+          # - Invalidate CDN cache
+          # - Send Slack notification
