@@ -1,0 +1,42 @@
+{
+  "sources": [
+    "request.args",
+    "request.form",
+    "request.data",
+    "request.json",
+    "request.GET",
+    "request.POST",
+    "request.values",
+    "request.files",
+    "request.query_string",
+    "request.cookies",
+    "request.headers",
+    "input",
+    "sys.stdin.read",
+    "sys.stdin.readline"
+  ],
+  "sinks": {
+    "cursor.execute": "sql_injection",
+    "db.execute": "sql_injection",
+    "os.system": "command_injection",
+    "os.popen": "command_injection",
+    "subprocess.call": "command_injection",
+    "subprocess.run": "command_injection",
+    "subprocess.Popen": "command_injection",
+    "eval": "unsafe_eval",
+    "exec": "unsafe_eval",
+    "open": "path_traversal",
+    "pickle.loads": "insecure_deserialization"
+  },
+  "sanitizers": [
+    "html.escape",
+    "markupsafe.escape",
+    "bleach.clean",
+    "shlex.quote",
+    "int",
+    "float",
+    "bool",
+    "ast.literal_eval",
+    "urllib.parse.quote"
+  ]
+}

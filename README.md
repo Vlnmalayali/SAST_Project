@@ -5,21 +5,27 @@ for intelligent explanation, fix suggestions, and professional security reportin
 
 ## Features
 
-- **8 Vulnerability Detectors**: SQL Injection, XSS, Command Injection, Hardcoded Secrets,
-  Weak Crypto, Insecure Deserialization, Unsafe Eval, Path Traversal
+- **OWASP Top 10:2025-Aligned Detectors**: SQL Injection, XSS, Command Injection, Hardcoded Secrets,
+  Weak Crypto, Insecure Deserialization, Unsafe Eval, Path Traversal, Supply Chain Failures,
+  Exception Mishandling
 - **AI-Powered Analysis**: GPT-4 explanations and code fix generation
-- **CVSS Scoring**: Professional severity scoring with project risk aggregation
+- **AI Fallback Mode**: Rule-based explanations/fixes when AI is disabled or unavailable
+- **CVSS Scoring**: CVSS v3.1-based scoring with project risk aggregation
 - **PDF Reports**: Executive summaries with charts and remediation steps
 - **Dashboard**: Real-time analytics with trend visualization
 - **GitHub Integration**: OAuth, repo scanning, PR comments
 - **Taint Analysis**: Data flow tracking from sources to sinks
+- **Language-Aware Taint Rules**: Externalized source/sink/sanitizer packs for Python, JavaScript, and Java
+- **Experimental JS/Java Taint Scan**: Text-based source-to-sink tracking for non-Python projects
+- **Inline Suppression**: Add `# nosast` or `// nosast` on a finding line to suppress it
+- **Compliance Mapping**: Per-finding OWASP Top 10:2025, CWE, PCI-DSS, and GDPR mapping
 - **CI/CD Integration**: GitHub Actions for automated PR scanning
 
 ## Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
-- OpenAI API key
+- OpenAI API key (optional if `AI_ENABLED=false`)
 
 ### Setup
 
@@ -32,7 +38,7 @@ cd major_project-2
 2. Configure environment:
 ```bash
 cp .env.example .env
-# Edit .env and set your OPENAI_API_KEY
+# Edit .env and set OPENAI_API_KEY (or disable AI with AI_ENABLED=false)
 ```
 
 3. Start all services:

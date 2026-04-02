@@ -1,151 +1,122 @@
+"""Hardcoded secrets and credentials detector."""
+
 import ast
 import re
+
 from app.core.detectors.base import BaseDetector, VulnerabilityFound
 
-SUSPICIOUS_NAMES = {
-    "password",
-    "passwd",
-    "pwd",
-    "secret",
-    "api_key",
-    "apikey",
-    "api_secret",
-    "token",
-    "access_token",
-    "auth_token",
-    "private_key",
-    "secret_key",
-    "aws_secret_access_key",
-    "aws_access_key_id",
-    "db_password",
-    "database_password",
-    "credentials",
-    "connection_string",
-}
-
-SECRET_PATTERNS = [
-    (r"AKIA[0-9A-Z]{16}", "AWS Access Key"),
-    (r"(?i)(sk|pk)[-_]?(live|test)[-_]?[a-zA-Z0-9]{20,}", "API Secret Key"),
-    (r"ghp_[a-zA-Z0-9]{36}", "GitHub Personal Access Token"),
-    (r"-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----", "Private Key"),
-    (r"eyJ[A-Za-z0-9-_]+\.eyJ[A-Za-z0-9-_]+\.[A-Za-z0-9-_.+/=]+", "JWT Token"),
-    (r"(?i)bearer\s+[a-zA-Z0-9\-._~+/]+=*", "Bearer Token"),
-]
-
-PLACEHOLDER_VALUES = {
-    "your_api_key",
-    "your_secret",
-    "changeme",
-    "password",
-    "xxx",
-    "todo",
-    "fixme",
-    "replace_me",
-    "your_api_key_here",
-    "placeholder",
-    "example",
-    "test",
-    "dummy",
-    "",
-    "none",
-    "null",
-}
-
-
 class HardcodedSecretsDetector(BaseDetector):
-    name = "hardcoded_secret"
-    description = "Detects hardcoded passwords, API keys, and secrets"
-    default_severity = "high"
-    cwe_id = "CWE-798"
+
+    SECRET_PATTERNS = [
+        (r'(?i)(password|passwd|pwd)\s*=\s*["\']([^"\']{8,})["\']', "hardcoded_password"),
+        (r'(?i)(secret|token|api_key|apikey)\s*=\s*["\']([^"\']{8,})["\']', "hardcoded_secret"),
+        (r'(?i)(access_key|private_key)\s*=\s*["\']([^"\']{8,})["\']', "hardcoded_key"),
+        (r'(AKIA[0-9A-Z]{12,})', "aws_access_key"),
+        (r'(?i)bearer\s+[a-zA-Z0-9\-._~+/]+=*', "bearer_token"),
+        (r'ghp_[a-zA-Z0-9]{36}', "github_pat"),
+        (r'sk-[a-zA-Z0-9]{20,}', "openai_key"),
+    ]
+
+    SECRET_VARIABLE_NAMES = [
+        "password", "passwd", "pwd", "secret", "token",
+        "api_key", "apikey", "access_key", "private_key",
+        "auth_token", "credentials", "db_password",
+        "secret_key", "encryption_key",
+    ]
+
+    PLACEHOLDER_VALUES = {
+        "changeme", "placeholder", "xxx", "your-",
+        "todo", "fixme", "none", "null",
+        "empty", "test", "fake", "dummy",
+    }
+
+    def _snippet(self, lines: list[str], lineno: int) -> str:
+        start = max(0, lineno - 3)
+        end = min(len(lines), lineno + 2)
+        return "\n".join(lines[start:end])
+
+    def _is_placeholder(self, value: str) -> bool:
+        val = value.lower().strip().strip("\"'")
+        return any(p in val for p in self.PLACEHOLDER_VALUES)
 
     def detect(
-        self, tree: ast.AST, file_path: str, source_code: str, source_lines: list[str]
+        self,
+        tree: ast.AST,
+        file_path: str,
+        source_code: str,
+        lines: list[str],
     ) -> list[VulnerabilityFound]:
-        vulns = []
+        vulnerabilities = []
+        seen_lines: set[int] = set()
 
-        # Skip test files
-        if self._is_test_file(file_path):
-            return vulns
-
-        # Check assignments for hardcoded secrets
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign):
-                vulns.extend(self._check_assignment(node, file_path, source_lines))
-            elif isinstance(node, ast.Call):
-                vulns.extend(self._check_keyword_args(node, file_path, source_lines))
-
-        # Regex-based pattern scanning
-        vulns.extend(self._scan_patterns(source_code, source_lines, file_path))
-
-        return vulns
-
-    def _check_assignment(
-        self, node: ast.Assign, file_path: str, source_lines: list[str]
-    ) -> list[VulnerabilityFound]:
-        vulns = []
-        for target in node.targets:
-            if not isinstance(target, ast.Name):
+        # --- Pass 1: Regex on raw lines ---
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
                 continue
-            var_name = target.id.lower()
-            if not any(s in var_name for s in SUSPICIOUS_NAMES):
-                continue
-            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-                val = node.value.value.strip()
-                if len(val) < 4 or val.lower() in PLACEHOLDER_VALUES:
+
+            for pattern, label in self.SECRET_PATTERNS:
+                match = re.search(pattern, line)
+                if not match:
                     continue
-                vulns.append(
-                    self._make_vuln(
-                        file_path=file_path,
-                        line_number=node.lineno,
-                        source_lines=source_lines,
-                        vulnerable_code=self._get_line_source(source_lines, node.lineno),
-                        confidence=0.8,
-                        description=f"Hardcoded secret in variable '{target.id}'",
-                    )
-                )
-        return vulns
 
-    def _check_keyword_args(
-        self, node: ast.Call, file_path: str, source_lines: list[str]
-    ) -> list[VulnerabilityFound]:
-        vulns = []
-        for kw in node.keywords:
-            if kw.arg and kw.arg.lower() in SUSPICIOUS_NAMES:
-                if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                    val = kw.value.value.strip()
-                    if len(val) >= 4 and val.lower() not in PLACEHOLDER_VALUES:
-                        vulns.append(
-                            self._make_vuln(
-                                file_path=file_path,
-                                line_number=node.lineno,
-                                source_lines=source_lines,
-                                vulnerable_code=self._get_line_source(source_lines, node.lineno),
-                                confidence=0.7,
-                                description=f"Hardcoded secret in keyword arg '{kw.arg}'",
-                            )
+                matched_text = match.group(0)
+                if self._is_placeholder(matched_text):
+                    continue
+
+                if i not in seen_lines:
+                    seen_lines.add(i)
+                    vulnerabilities.append(
+                        VulnerabilityFound(
+                            file_path=file_path,
+                            line_number=i,
+                            end_line_number=i,  # Added
+                            vulnerability_type="hardcoded_secret",
+                            confidence=0.85,
+                            code_snippet=self._snippet(lines, i),
+                            vulnerable_code=stripped,
+                            cwe_id="CWE-798",
+                            severity="high",  # Added
                         )
-        return vulns
+                    )
+                break
 
-    def _scan_patterns(
-        self, source_code: str, source_lines: list[str], file_path: str
-    ) -> list[VulnerabilityFound]:
-        vulns = []
-        for pattern, label in SECRET_PATTERNS:
-            for match in re.finditer(pattern, source_code):
-                line_num = source_code[: match.start()].count("\n") + 1
-                vulns.append(
-                    self._make_vuln(
+        # --- Pass 2: AST variable name check ---
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                var_name = target.id.lower()
+                if not any(kw in var_name for kw in self.SECRET_VARIABLE_NAMES):
+                    continue
+                if not isinstance(node.value, ast.Constant):
+                    continue
+                if not isinstance(node.value.value, str):
+                    continue
+
+                value = node.value.value
+                lineno = node.lineno
+
+                if len(value) < 8 or self._is_placeholder(value):
+                    continue
+                if lineno in seen_lines:
+                    continue
+
+                seen_lines.add(lineno)
+                vulnerabilities.append(
+                    VulnerabilityFound(
                         file_path=file_path,
-                        line_number=line_num,
-                        source_lines=source_lines,
-                        vulnerable_code=self._get_line_source(source_lines, line_num),
-                        confidence=0.85,
-                        severity="critical" if "Private Key" in label else "high",
-                        description=f"Detected {label} pattern in source code",
+                        line_number=lineno,
+                        end_line_number=lineno,  # Added
+                        vulnerability_type="hardcoded_secret",
+                        confidence=0.90,
+                        code_snippet=self._snippet(lines, lineno),
+                        vulnerable_code=lines[lineno - 1].strip() if lineno <= len(lines) else "",
+                        cwe_id="CWE-798",
+                        severity="high",  # Added
                     )
                 )
-        return vulns
 
-    def _is_test_file(self, path: str) -> bool:
-        lower = path.lower()
-        return "test" in lower or "example" in lower or "fixture" in lower
+        return vulnerabilities

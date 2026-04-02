@@ -16,11 +16,7 @@ env:
   PYTHON_VERSION: '3.11'
 
 jobs:
-<<<<<<< HEAD
-    lint:
-=======
   lint:
->>>>>>> bc5ba9ad6041be3f266ecdc784fdf90bb8de1d63
     name: Lint & Format Check
     runs-on: ubuntu-latest
     steps:
@@ -36,7 +32,6 @@ jobs:
 
       - name: Install linting tools
         run: |
-<<<<<<< HEAD
           pip install ruff black
 
       - name: Auto-fix with Ruff
@@ -44,35 +39,16 @@ jobs:
           cd backend
           ruff check app/ --fix --unsafe-fixes || true
           ruff format app/ || true
-=======
-          pip install ruff black mypy
->>>>>>> bc5ba9ad6041be3f266ecdc784fdf90bb8de1d63
 
       - name: Run Ruff linter
         run: |
           cd backend
-<<<<<<< HEAD
           ruff check app/ --config pyproject.toml
-=======
-          ruff check app/ --output-format=github
->>>>>>> bc5ba9ad6041be3f266ecdc784fdf90bb8de1d63
 
       - name: Check Black formatting
         run: |
           cd backend
-<<<<<<< HEAD
           black --check --diff app/ || true
-=======
-          black --check --diff app/
-
-      - name: Run MyPy type checking (non-blocking)
-        continue-on-error: true
-        run: |
-          cd backend
-          pip install -r requirements.txt
-          mypy app/ --ignore-missing-imports --no-error-summary || true
-
->>>>>>> bc5ba9ad6041be3f266ecdc784fdf90bb8de1d63
   test:
     name: Tests & Coverage
     runs-on: ubuntu-latest

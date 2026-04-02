@@ -45,3 +45,21 @@ def greet(name: str) -> str:
 
         assert result.total_files_scanned == 2
         assert len(result.vulnerabilities) >= 1
+
+    def test_inline_nosast_suppression_python(self):
+        code = """
+def run(cmd):
+    os.system(cmd)  # nosast
+"""
+        scanner = CodeScanner()
+        result = scanner.scan_source(code, file_path="suppressed.py")
+        assert len(result.vulnerabilities) == 0
+
+    def test_inline_nosast_suppression_javascript(self):
+        code = """
+const userCmd = req.query.cmd;
+child_process.exec(userCmd); // nosast
+"""
+        scanner = CodeScanner(language="javascript")
+        result = scanner.scan_source(code, file_path="suppressed.js")
+        assert len(result.vulnerabilities) == 0

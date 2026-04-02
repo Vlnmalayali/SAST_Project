@@ -20,7 +20,6 @@ from app.utils.zip_handler import safe_extract_zip, ZipExtractionError
 
 router = APIRouter()
 
-
 @router.post("/projects/{project_id}/scans", response_model=ScanResponse, status_code=201)
 async def create_scan(
     project_id: str,
@@ -39,9 +38,14 @@ async def create_scan(
     await db.flush()
     await db.refresh(scan)
 
+    # ✅ Commit BEFORE dispatching to Celery
+    await db.commit()
+
+    scan_id_str = str(scan.id)  # ✅ Convert UUID to string for Celery
+
     # Handle file upload
     if file:
-        scan_dir = os.path.join(settings.SCAN_STORAGE_PATH, scan.id)
+        scan_dir = os.path.join(settings.SCAN_STORAGE_PATH, scan_id_str)
         os.makedirs(scan_dir, exist_ok=True)
 
         file_content = await file.read()
@@ -54,12 +58,18 @@ async def create_scan(
                 f.write(file_content)
             try:
                 extract_dir = safe_extract_zip(zip_path, scan_dir)
-                run_scan_directory_task.delay(scan.id, extract_dir, project.language)
+                run_scan_directory_task.delay(scan_id_str, extract_dir, project.language)
             except ZipExtractionError as e:
                 raise HTTPException(status_code=400, detail=str(e))
+        else:
+            # Single file upload
+            file_path = os.path.join(scan_dir, file.filename or "uploaded_file")
+            with open(file_path, "wb") as f:
+                f.write(file_content)
+            run_scan_directory_task.delay(scan_id_str, scan_dir, project.language)
 
     elif source_code:
-        run_scan_source_task.delay(scan.id, source_code)
+        run_scan_source_task.delay(scan_id_str, source_code, None, project.language)
     else:
         raise HTTPException(status_code=400, detail="Provide file upload or source_code")
 

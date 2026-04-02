@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.compliance_mapping import get_compliance_mapping
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
@@ -18,6 +19,15 @@ from app.schemas.vulnerability import (
 )
 
 router = APIRouter()
+
+
+def _to_vulnerability_response(vuln: Vulnerability) -> VulnerabilityResponse:
+    payload = VulnerabilityResponse.model_validate(vuln).model_dump()
+    payload["compliance"] = get_compliance_mapping(
+        vulnerability_type=vuln.vulnerability_type,
+        cwe_id=vuln.cwe_id,
+    )
+    return VulnerabilityResponse(**payload)
 
 
 @router.get("/scans/{scan_id}/vulnerabilities", response_model=VulnerabilityListResponse)
@@ -52,7 +62,7 @@ async def list_vulnerabilities(
     result = await db.execute(q)
 
     return VulnerabilityListResponse(
-        vulnerabilities=[VulnerabilityResponse.model_validate(v) for v in result.scalars().all()],
+        vulnerabilities=[_to_vulnerability_response(v) for v in result.scalars().all()],
         total=total,
         page=page,
         pages=math.ceil(total / limit) if total > 0 else 1,
@@ -68,7 +78,7 @@ async def get_vulnerability(
     vuln = await db.get(Vulnerability, vuln_id)
     if not vuln:
         raise HTTPException(status_code=404, detail="Vulnerability not found")
-    return VulnerabilityResponse.model_validate(vuln)
+    return _to_vulnerability_response(vuln)
 
 
 @router.patch("/vulnerabilities/{vuln_id}", response_model=VulnerabilityResponse)
@@ -87,7 +97,7 @@ async def update_vulnerability(
         setattr(vuln, key, val)
     await db.flush()
     await db.refresh(vuln)
-    return VulnerabilityResponse.model_validate(vuln)
+    return _to_vulnerability_response(vuln)
 
 
 @router.get("/vulnerabilities/{vuln_id}/taint-flows", response_model=list[TaintFlowResponse])

@@ -24,6 +24,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.core.compliance_mapping import get_compliance_mapping
 from app.reporting.charts import (
     generate_risk_gauge,
     generate_severity_pie_chart,
@@ -220,6 +221,17 @@ def generate_pdf_report(file_path: str, scan, vulnerabilities: list) -> str:
         ]
         if vuln.cwe_id:
             detail_data.append(["CWE", vuln.cwe_id])
+
+        compliance = get_compliance_mapping(
+            vulnerability_type=vuln.vulnerability_type,
+            cwe_id=vuln.cwe_id,
+        )
+        if compliance.get("owasp_top10"):
+            detail_data.append(["OWASP Top 10", compliance["owasp_top10"]])
+        if compliance.get("pci_dss"):
+            detail_data.append(["PCI-DSS", "; ".join(compliance["pci_dss"])])
+        if compliance.get("gdpr"):
+            detail_data.append(["GDPR", "; ".join(compliance["gdpr"])])
 
         detail_table = Table(detail_data, colWidths=[100, 300])
         detail_table.setStyle(

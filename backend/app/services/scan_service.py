@@ -3,8 +3,6 @@
 import logging
 import os
 import shutil
-import tempfile
-import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select, func
@@ -12,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.scanner import CodeScanner
-from app.core.taint_analysis import TaintAnalyzer
 from app.ai.openai_client import explain_vulnerability, suggest_fix
 from app.ai.response_parser import parse_explanation, parse_fix
 from app.models.scan import Scan
@@ -55,9 +52,6 @@ async def run_scan_on_directory(
         scanner = CodeScanner(language=language)
         result = scanner.scan_directory(directory, max_files=settings.MAX_FILES_PER_SCAN)
 
-        # Run taint analysis
-        TaintAnalyzer()
-
         # Save vulnerabilities
         for vuln_found in result.vulnerabilities:
             explanation_data = await explain_vulnerability(
@@ -92,6 +86,9 @@ async def run_scan_on_directory(
                 cwe_id=parsed_explanation.get("cwe") or vuln_found.cwe_id,
             )
             db.add(vuln)
+            await db.flush()
+            for taint_flow in _build_taint_flows(vuln.id, vuln_found.metadata):
+                db.add(taint_flow)
 
         # Update scan record
         scan.status = "completed"
@@ -113,11 +110,31 @@ async def run_scan_on_directory(
     return scan
 
 
+def _build_taint_flows(vulnerability_id: str, metadata: dict | None) -> list[TaintFlow]:
+    taint_flows = (metadata or {}).get("taint_flows", [])
+    flows: list[TaintFlow] = []
+    for flow in taint_flows:
+        flows.append(
+            TaintFlow(
+                vulnerability_id=vulnerability_id,
+                source_file=flow.get("source_file", ""),
+                source_line=flow.get("source_line", 0),
+                source_type=flow.get("source_type", "unknown"),
+                sink_file=flow.get("sink_file", ""),
+                sink_line=flow.get("sink_line", 0),
+                sink_type=flow.get("sink_type", "unknown"),
+                flow_path={"steps": flow.get("flow_path", [])},
+            )
+        )
+    return flows
+
+
 async def run_scan_on_source(
     db: AsyncSession,
     scan_id: str,
     source_code: str,
     file_name: str = "uploaded_code.py",
+    language: str = "python",
 ) -> Scan:
     """Execute a scan on uploaded source code."""
     # Write source to temp file and scan as directory
@@ -128,7 +145,7 @@ async def run_scan_on_source(
     try:
         with open(file_path, "w") as f:
             f.write(source_code)
-        return await run_scan_on_directory(db, scan_id, scan_dir)
+        return await run_scan_on_directory(db, scan_id, scan_dir, language=language)
     finally:
         shutil.rmtree(scan_dir, ignore_errors=True)
 

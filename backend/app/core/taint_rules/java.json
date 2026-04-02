@@ -1,0 +1,26 @@
+{
+  "sources": [
+    "request.getParameter",
+    "request.getHeader",
+    "request.getCookies",
+    "request.getQueryString",
+    "System.getenv",
+    "System.getProperty"
+  ],
+  "sinks": {
+    "Statement.executeQuery": "sql_injection",
+    "Statement.executeUpdate": "sql_injection",
+    "Statement.execute": "sql_injection",
+    "Runtime.getRuntime.exec": "command_injection",
+    "ProcessBuilder.start": "command_injection",
+    "Class.forName": "unsafe_eval",
+    "ObjectInputStream.readObject": "insecure_deserialization"
+  },
+  "sanitizers": [
+    "PreparedStatement",
+    "StringEscapeUtils.escapeHtml4",
+    "URLEncoder.encode",
+    "Integer.parseInt",
+    "Long.parseLong"
+  ]
+}

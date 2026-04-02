@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = ""
+    AI_ENABLED: bool = True
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
     OPENAI_MAX_TOKENS: int = 2000
     OPENAI_FALLBACK_MODEL: str = "gpt-3.5-turbo"

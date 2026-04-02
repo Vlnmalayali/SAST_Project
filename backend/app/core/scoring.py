@@ -1,93 +1,33 @@
-"""CVSS-style scoring engine for vulnerabilities."""
+"""CVSS v3.1 scoring engine for vulnerabilities."""
 
 import math
 from dataclasses import dataclass
 
-ATTACK_VECTOR = {
-    "network": 0.85,
-    "adjacent": 0.62,
-    "local": 0.55,
-    "physical": 0.20,
+METRIC_VALUES = {
+    "AV": {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.20},
+    "AC": {"L": 0.77, "H": 0.44},
+    "UI": {"N": 0.85, "R": 0.62},
+    "C": {"H": 0.56, "L": 0.22, "N": 0.0},
+    "I": {"H": 0.56, "L": 0.22, "N": 0.0},
+    "A": {"H": 0.56, "L": 0.22, "N": 0.0},
 }
-ATTACK_COMPLEXITY = {"low": 0.77, "high": 0.44}
-PRIVILEGES_REQUIRED = {"none": 0.85, "low": 0.62, "high": 0.27}
-USER_INTERACTION = {"none": 0.85, "required": 0.62}
-IMPACT_VALUES = {"high": 0.56, "low": 0.22, "none": 0.0}
 
-VULN_TYPE_PROFILES = {
-    "sql_injection": {
-        "av": "network",
-        "ac": "low",
-        "pr": "none",
-        "ui": "none",
-        "c": "high",
-        "i": "high",
-        "a": "high",
-    },
-    "xss": {
-        "av": "network",
-        "ac": "low",
-        "pr": "none",
-        "ui": "required",
-        "c": "low",
-        "i": "low",
-        "a": "none",
-    },
-    "command_injection": {
-        "av": "network",
-        "ac": "low",
-        "pr": "none",
-        "ui": "none",
-        "c": "high",
-        "i": "high",
-        "a": "high",
-    },
-    "hardcoded_secret": {
-        "av": "network",
-        "ac": "low",
-        "pr": "none",
-        "ui": "none",
-        "c": "high",
-        "i": "none",
-        "a": "none",
-    },
-    "weak_crypto": {
-        "av": "network",
-        "ac": "high",
-        "pr": "none",
-        "ui": "none",
-        "c": "high",
-        "i": "none",
-        "a": "none",
-    },
-    "insecure_deserialization": {
-        "av": "network",
-        "ac": "low",
-        "pr": "none",
-        "ui": "none",
-        "c": "high",
-        "i": "high",
-        "a": "high",
-    },
-    "unsafe_eval": {
-        "av": "network",
-        "ac": "low",
-        "pr": "none",
-        "ui": "none",
-        "c": "high",
-        "i": "high",
-        "a": "high",
-    },
-    "path_traversal": {
-        "av": "network",
-        "ac": "low",
-        "pr": "low",
-        "ui": "none",
-        "c": "high",
-        "i": "low",
-        "a": "none",
-    },
+PR_VALUES_SCOPE_U = {"N": 0.85, "L": 0.62, "H": 0.27}
+PR_VALUES_SCOPE_C = {"N": 0.85, "L": 0.68, "H": 0.50}
+
+VULN_TYPE_VECTORS = {
+    "sql_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "xss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "command_injection": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "hardcoded_secret": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "weak_crypto": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "insecure_deserialization": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "unsafe_eval": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "path_traversal": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:L/A:N",
+    "supply_chain_failure": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+    "exception_mishandling": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
 }
+DEFAULT_VECTOR = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L"
 
 
 @dataclass
@@ -96,64 +36,101 @@ class CVSSResult:
     severity: str
     impact_subscore: float
     exploitability_subscore: float
+    vector: str | None = None
 
 
 def calculate_cvss(vulnerability_type: str, confidence: float = 1.0) -> CVSSResult:
-    """Calculate CVSS-like score for a vulnerability type."""
-    profile = VULN_TYPE_PROFILES.get(vulnerability_type)
-    if not profile:
+    """
+    Calculate CVSS v3.1 base score using official formula.
+
+    Confidence is applied after CVSS computation as a project-specific weighting.
+    """
+    vector = VULN_TYPE_VECTORS.get(vulnerability_type, DEFAULT_VECTOR)
+    parsed = _parse_vector(vector)
+
+    # Fallback if vector is malformed.
+    if not parsed:
         return CVSSResult(
             base_score=5.0,
             severity="medium",
             impact_subscore=0.5,
             exploitability_subscore=0.5,
+            vector=vector,
         )
 
-    av = ATTACK_VECTOR[profile["av"]]
-    ac = ATTACK_COMPLEXITY[profile["ac"]]
-    pr = PRIVILEGES_REQUIRED[profile["pr"]]
-    ui = USER_INTERACTION[profile["ui"]]
+    scope = parsed["S"]
+    av = METRIC_VALUES["AV"][parsed["AV"]]
+    ac = METRIC_VALUES["AC"][parsed["AC"]]
+    ui = METRIC_VALUES["UI"][parsed["UI"]]
+    pr_map = PR_VALUES_SCOPE_C if scope == "C" else PR_VALUES_SCOPE_U
+    pr = pr_map[parsed["PR"]]
 
-    c = IMPACT_VALUES[profile["c"]]
-    i = IMPACT_VALUES[profile["i"]]
-    a = IMPACT_VALUES[profile["a"]]
+    c = METRIC_VALUES["C"][parsed["C"]]
+    i = METRIC_VALUES["I"][parsed["I"]]
+    a = METRIC_VALUES["A"][parsed["A"]]
 
     iss = 1 - ((1 - c) * (1 - i) * (1 - a))
     exploitability = 8.22 * av * ac * pr * ui
 
-    if iss <= 0:
-        base_score = 0.0
+    if scope == "U":
+        impact = 6.42 * iss
     else:
-        base_score = min(10.0, round_up(iss * 6.42 + exploitability))
+        impact = 7.52 * (iss - 0.029) - 3.25 * math.pow(iss - 0.02, 15)
 
-    base_score = round(base_score * confidence, 1)
-    base_score = min(10.0, base_score)
+    if impact <= 0:
+        base_score = 0.0
+    elif scope == "U":
+        base_score = _round_up_1dp(min(impact + exploitability, 10.0))
+    else:
+        base_score = _round_up_1dp(min(1.08 * (impact + exploitability), 10.0))
 
-    severity = score_to_severity(base_score)
+    adjusted_score = min(10.0, round(base_score * _clamp(confidence, 0.0, 1.0), 1))
+    severity = score_to_severity(adjusted_score)
 
     return CVSSResult(
-        base_score=base_score,
+        base_score=adjusted_score,
         severity=severity,
-        impact_subscore=round(iss, 2),
+        impact_subscore=round(impact, 2),
         exploitability_subscore=round(exploitability, 2),
+        vector=vector,
     )
+
+
+def _parse_vector(vector: str) -> dict[str, str] | None:
+    try:
+        parts = vector.split("/")
+        if not parts or not parts[0].startswith("CVSS:3.1"):
+            return None
+        metrics: dict[str, str] = {}
+        for part in parts[1:]:
+            key, value = part.split(":", 1)
+            metrics[key] = value
+        required = {"AV", "AC", "PR", "UI", "S", "C", "I", "A"}
+        if not required.issubset(metrics):
+            return None
+        return metrics
+    except Exception:
+        return None
 
 
 def score_to_severity(score: float) -> str:
     if score >= 9.0:
         return "critical"
-    elif score >= 7.0:
+    if score >= 7.0:
         return "high"
-    elif score >= 4.0:
+    if score >= 4.0:
         return "medium"
-    elif score >= 0.1:
+    if score >= 0.1:
         return "low"
     return "info"
 
 
-def round_up(value: float) -> float:
-    """Round up to one decimal place."""
+def _round_up_1dp(value: float) -> float:
     return math.ceil(value * 10) / 10
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
 
 
 def calculate_project_risk_score(
